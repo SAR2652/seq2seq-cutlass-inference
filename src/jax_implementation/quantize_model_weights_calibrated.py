@@ -18,7 +18,7 @@ def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--ckpt_dir',
                         help='Directory containing checkpoints',
-                        type=str, default='output/ddp_kv/output/checkpoints')
+                        type=str, default='output/normal/checkpoints')
     parser.add_argument('--output_dir',
                         help='Directory to store output',
                         type=str, default='./output')
@@ -98,7 +98,7 @@ def quantize_bias_int32(bias: jnp.ndarray, accum_scale: float):
 # ---------------------------------------------------------------------------
 
 def build_calib_dataloader(calib_data_path, tokenizer, num_calib_samples,
-                            calib_batch_size):
+                           calib_batch_size):
     """Load calibration CSV and return a DataLoader over the first
     num_calib_samples rows."""
     import pandas as pd
@@ -191,7 +191,8 @@ def calibrate_hidden_scale(params, model, calib_loader, num_bits=8):
     @jax.jit
     def encoder_fn(inputs):
         # encoder(x) runs embedding + LSTM and returns the hidden-state
-        # sequence [B, seq_len, hidden_dim] (or concatenation for bidirectional).
+        # sequence [B, seq_len, hidden_dim] (or concatenation for
+        # bidirectional).
         return model.apply(
             {'params': params},
             inputs,
@@ -203,9 +204,10 @@ def calibrate_hidden_scale(params, model, calib_loader, num_bits=8):
 
     for inputs, _, _, _ in calib_loader:
         inputs = jnp.array(inputs)
-        # encoder returns (outputs, hidden, cell); outputs [B, seq_len, hidden_dim]
-        # is the stacked fwd_hidden (and bkwd_hidden concatenated if bidirectional)
-        # at every timestep — exactly the values fed back as h in the C++ forward.
+        # encoder returns (outputs, hidden, cell); outputs [B, seq_len,
+        # hidden_dim] is the stacked fwd_hidden (and bkwd_hidden concatenated
+        # if bidirectional) at every timestep — exactly the values fed back as
+        # h in the C++ forward.
         outputs, _, _ = encoder_fn(inputs)
         batch_abs_max = float(jnp.max(jnp.abs(outputs.astype(jnp.float32))))
         abs_max = max(abs_max, batch_abs_max)
@@ -303,7 +305,8 @@ def recursively_quantize(params: Union[dict], scale_x: float,
             # and warn so the user knows the scale may not match.
             print(f"Warning: no sibling kernel found for bias '{full_key}'. "
                   f"Falling back to independent int32 quantization.")
-            from src.jax_implementation.quantize_model_weights import quantize_tensor_int32
+            from src.jax_implementation.quantize_model_weights import \
+                quantize_tensor_int32
             quantized_params[k] = quantize_tensor_int32(v)
         else:
             input_scale = h_scale if in_lstm_hidden_block else scale_x
@@ -456,7 +459,8 @@ def quantize_weights_to_int8(args):
     )
     # scale_x: dequant scale for int8 embedding output (x @ Wx GEMM input)
     scale_x = calibrate_input_scale(params, model, calib_loader)
-    # h_scale: dequant scale for transiently-quantized hidden state (h @ Wh GEMM input)
+    # h_scale: dequant scale for transiently-quantized hidden state
+    # (h @ Wh GEMM input)
     h_scale = calibrate_hidden_scale(params, model, calib_loader)
 
     # ------------------------------------------------------------------
