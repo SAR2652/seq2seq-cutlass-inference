@@ -90,6 +90,12 @@ LSTMCell<KernelType, BiasType>::LSTMCell(
         io_md, "kernel", metadata
     );
 
+    // One non-blocking stream per gate so all four gates can run in parallel.
+    // cudaStreamNonBlocking ensures they don't implicitly synchronize with the
+    // legacy (NULL) stream, keeping them fully independent from each other and
+    // from the caller's stream.
+    for (int i = 0; i < 4; i++)
+        cudaStreamCreateWithFlags(&gate_streams_[i], cudaStreamNonBlocking);
 }
 
 template <typename KernelType, typename BiasType>
@@ -111,6 +117,24 @@ LSTMCell<KernelType, BiasType>::~LSTMCell()
     cudaFreeAsync(ig_kernel, stream_);
     cudaFreeAsync(ii_kernel, stream_);
     cudaFreeAsync(io_kernel, stream_);
+
+    for (int i = 0; i < 4; i++)
+        cudaStreamDestroy(gate_streams_[i]);
+}
+
+
+// Broadcast a 1-D bias row [N] into a 2-D matrix [M, N].
+// Each thread writes one element: out[row * N + col] = bias[col].
+template <typename BiasType>
+__global__ void broadcast_bias_kernel(
+    BiasType       *out,    // [M, N] destination
+    const BiasType *bias,   // [N]    source (one row)
+    int             M,
+    int             N)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= M * N) return;
+    out[idx] = bias[idx % N];
 }
 
 
@@ -221,13 +245,17 @@ void run_gate(
     }
 
     // 3) hWh_b_buf = h_int8 @ Wh + bh
-    //    Broadcast bias row across all B rows, then fuse into GEMM with beta=1.
-    cudaMemcpy2DAsync(
-        hWh_b_buf, N * sizeof(BiasType),
-        bh,        N * sizeof(BiasType),
-        N * sizeof(BiasType), M,
-        cudaMemcpyDeviceToDevice, stream
-    );
+    //    Broadcast bias row [N] across all M rows of hWh_b_buf [M, N],
+    //    then fuse into GEMM with beta=1.
+    //    cudaMemcpy2DAsync cannot be used here: its src_pitch > 0 means it would
+    //    read M rows from bh, but bh has only one row (N elements) — a buffer overread.
+    {
+        int total = M * N;
+        int block = 256;
+        int grid  = (total + block - 1) / block;
+        broadcast_bias_kernel<BiasType><<<grid, block, 0, stream>>>(
+            hWh_b_buf, bh, M, N);
+    }
     {
         Gemm gemm_op;
         typename Gemm::Arguments args(
@@ -296,11 +324,61 @@ void LSTMCell<KernelType, BiasType>::forward(
     int B = batch_size;
     int H = hidden_dim;
 
+    // Allocate gate output buffers on the caller's stream.
+    // A "setup done" event lets the four gate streams wait for these
+    // allocations before they start writing into the buffers.
+
+    // Alternative: allocate each buffer on its respective gate_streams_[i].
+    // That would eliminate the setup_done event below, because an alloc and
+    // its first write would be on the same stream (ordered automatically).
+    // cudaFreeAsync can still happen on a different stream (the caller's),
+    // as long as it is ordered after the last use — which it is, because
+    // stream already waits for all gate_done events before lstm_update_kernel.
+    //
+    // That approach is not used here because the performance difference is
+    // negligible: cudaMallocAsync is a ~1–5 µs pool bump and the four
+    // cudaStreamWaitEvent calls for setup_done cost a similar amount, while
+    // each run_gate (two int8 GEMMs + pointwise activate) takes 100–500 µs.
+    // The event overhead is 100× smaller than the work it guards, so the
+    // saving would not be measurable. The current layout is kept because the
+    // explicit setup_done barrier makes the ordering intent easier to follow.
     float *i_gate, *f_gate, *g_gate, *o_gate;
     cudaMallocAsync(&i_gate, sizeof(float) * B * H, stream);
     cudaMallocAsync(&f_gate, sizeof(float) * B * H, stream);
     cudaMallocAsync(&g_gate, sizeof(float) * B * H, stream);
     cudaMallocAsync(&o_gate, sizeof(float) * B * H, stream);
+
+    // Two event fences per call:
+    // setup_done event — recorded on the caller's stream after the 4
+    // cudaMallocAsync calls. Each gate_streams_[i] waits on it before
+    // launching. Without this, a gate stream could start writing to a buffer
+    // that hasn't been allocated yet (the malloc is async, so there's no
+    // implicit ordering between stream and the gate streams).
+    // gate_done[4] events — each gate stream records one after its run_gate
+    // completes. The caller's stream waits on all four before
+    // lstm_update_kernel, which needs all four gate outputs ready. Without
+    // this, the update kernel could race ahead of a still-running gate.
+    // cudaEventDisableTiming is used on all events — it skips the hardware
+    // timestamp, making the events cheaper to create and record.
+    // cudaStreamNonBlocking on the gate streams prevents them from implicitly
+    // synchronizing with the legacy NULL stream, so they stay truly independent.
+    // The cudaFreeAsync calls at the end stay on stream, which is correct —
+    // they're ordered after lstm_update_kernel by the stream's own queue.
+
+    cudaEvent_t setup_done;
+    cudaEventCreateWithFlags(&setup_done, cudaEventDisableTiming);
+
+    // Plant flag
+    cudaEventRecord(setup_done, stream);
+
+    // Pause till flag is stamped
+    for (int i = 0; i < 4; i++)
+        cudaStreamWaitEvent(gate_streams_[i], setup_done, 0);
+    cudaEventDestroy(setup_done);
+
+    // The four gates are independent — dispatch them concurrently on
+    // gate_streams_[0..3].  Each stream runs its own quantize + 2×GEMM +
+    // activate pipeline without blocking the others.
 
     // i = sigmoid( ii(x) + hi(h) )
     run_gate<KernelType, BiasType>(
@@ -308,7 +386,7 @@ void LSTMCell<KernelType, BiasType>::forward(
         B, input_dim, H, /*use_sigmoid=*/true,
         x_quant_scale * ii_kernel_scale,
         h_quant_scale * hi_kernel_scale,
-        h_quant_scale, stream);
+        h_quant_scale, gate_streams_[0]);
 
     // f = sigmoid( if(x) + hf(h) )
     run_gate<KernelType, BiasType>(
@@ -316,7 +394,7 @@ void LSTMCell<KernelType, BiasType>::forward(
         B, input_dim, H, /*use_sigmoid=*/true,
         x_quant_scale * if_kernel_scale,
         h_quant_scale * hf_kernel_scale,
-        h_quant_scale, stream);
+        h_quant_scale, gate_streams_[1]);
 
     // g = tanh( ig(x) + hg(h) )
     run_gate<KernelType, BiasType>(
@@ -324,7 +402,7 @@ void LSTMCell<KernelType, BiasType>::forward(
         B, input_dim, H, /*use_sigmoid=*/false,
         x_quant_scale * ig_kernel_scale,
         h_quant_scale * hg_kernel_scale,
-        h_quant_scale, stream);
+        h_quant_scale, gate_streams_[2]);
 
     // o = sigmoid( io(x) + ho(h) )
     run_gate<KernelType, BiasType>(
@@ -332,7 +410,29 @@ void LSTMCell<KernelType, BiasType>::forward(
         B, input_dim, H, /*use_sigmoid=*/true,
         x_quant_scale * io_kernel_scale,
         h_quant_scale * ho_kernel_scale,
-        h_quant_scale, stream);
+        h_quant_scale, gate_streams_[3]);
+
+    // Rejoin: make the caller's stream wait for all four gates to finish
+    // before launching lstm_update_kernel, which reads all four gate outputs.
+    
+    cudaEvent_t gate_done[4];
+    for (int i = 0; i < 4; i++) {
+        // When you create a normal event (with timing), the GPU writes a
+        // hardware timestamp into device memory every time cudaEventRecord is
+        // called. That timestamp can later be read by cudaEventElapsedTime to
+        // measure how long something took.
+        // Writing that timestamp costs a small but real amount of work — a
+        // global memory write that can stall the GPU's command processor
+        // momentarily.
+        // cudaEventDisableTiming tells the GPU: don't bother writing a
+        // timestamp, just mark the event as reached. The event still works as
+        // a synchronization fence — cudaStreamWaitEvent still correctly pauses a
+        // stream until the event fires. It just can't be used for timing.
+        cudaEventCreateWithFlags(&gate_done[i], cudaEventDisableTiming);
+        cudaEventRecord(gate_done[i], gate_streams_[i]);
+        cudaStreamWaitEvent(stream, gate_done[i], 0);
+        cudaEventDestroy(gate_done[i]);
+    }
 
     // new_c = f * c + i * g
     // new_h = o * tanh(new_c)

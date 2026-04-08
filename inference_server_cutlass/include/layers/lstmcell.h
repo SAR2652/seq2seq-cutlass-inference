@@ -28,6 +28,10 @@ class LSTMCell: public Layer
         // h itself is always stored as float32; this scale is only used at GEMM boundaries.
         float h_quant_scale;
 
+        // Four persistent streams — one per gate (i, f, g, o).
+        // Pre-created to avoid per-call overhead; gate computations run in parallel.
+        cudaStream_t gate_streams_[4];
+
     public:
         LSTMCell(const nlohmann::json lstm_metadata,
             const WeightsMetadata& metadata);

@@ -1,11 +1,13 @@
 import os
-import jax
 import json
 import argparse
+from typing import Union
+
 import numpy as np
+import pandas as pd
+import jax
 from jax import random
 import jax.numpy as jnp
-from typing import Union
 import orbax.checkpoint as ocp
 from torch.utils.data import DataLoader
 from src.common_utils import load_tokenizer, collate_fn
@@ -101,7 +103,6 @@ def build_calib_dataloader(calib_data_path, tokenizer, num_calib_samples,
                            calib_batch_size):
     """Load calibration CSV and return a DataLoader over the first
     num_calib_samples rows."""
-    import pandas as pd
     df = pd.read_csv(calib_data_path)
     if num_calib_samples > 0:
         df = df.iloc[:num_calib_samples, :]
@@ -221,6 +222,52 @@ def calibrate_hidden_scale(params, model, calib_loader, num_bits=8):
     return h_scale
 
 
+def quantize_tensor_int32(tensor: jnp.ndarray):
+    """Quantizes a float32 JAX tensor to int32 using uniform affine
+    quantization (per-tensor). This implementation avoids integer overflow
+    by performing range arithmetic in floating point and only casting at the
+    end.
+    """
+    # int32 range constants as Python ints
+    qmin_int = -2 ** 31
+    qmax_int = 2 ** 31 - 1
+
+    # Convert to JAX-friendly floats for range arithmetic
+    qmin = jnp.array(float(qmin_int), dtype=jnp.float32)
+    qmax = jnp.array(float(qmax_int), dtype=jnp.float32)
+    qrange = qmax - qmin  # float32 safe
+
+    min_val = jnp.min(tensor).astype(jnp.float32)
+    max_val = jnp.max(tensor).astype(jnp.float32)
+
+    # Compute scale in float32 to avoid overflow/underflow inside JAX
+    scale = jnp.where(max_val != min_val, (max_val - min_val) / qrange,
+                      jnp.array(1.0, dtype=jnp.float32))
+
+    # Avoid division by zero if scale is zero
+    safe_scale = jnp.where(scale == 0.0, jnp.array(1.0, dtype=jnp.float32),
+                           scale)
+
+    # Compute zero_point in float then round and cast to int64 before final
+    # cast
+    zero_point_f = jnp.round(qmin - min_val / safe_scale)
+    zero_point = zero_point_f.astype(jnp.int64)
+
+    # Quantize in float then clip and cast to int32
+    quant_f = jnp.round(tensor.astype(jnp.float32) / safe_scale + zero_point_f)
+    quant_clipped = jnp.clip(quant_f, qmin, qmax).astype(jnp.int32)
+
+    # If the tensor had no dynamic range, return zeros
+    quantized = jnp.where(max_val != min_val, quant_clipped,
+                          jnp.zeros_like(tensor, dtype=jnp.int32))
+
+    return {
+        'quantized': quantized,
+        'scale': scale,
+        'zero_point': zero_point
+    }
+
+
 # ---------------------------------------------------------------------------
 # Recursive quantization (two-pass per level: kernels first, then biases)
 # ---------------------------------------------------------------------------
@@ -261,7 +308,6 @@ def recursively_quantize(params: Union[dict], scale_x: float,
                 v, scale_x, h_scale, parent_key=full_key)
 
         elif isinstance(v, jnp.ndarray) and v.dtype == jnp.float32:
-
             if "embedding" in lower_key:
                 quantized_params[k] = v.astype(jnp.bfloat16)
 
@@ -305,8 +351,6 @@ def recursively_quantize(params: Union[dict], scale_x: float,
             # and warn so the user knows the scale may not match.
             print(f"Warning: no sibling kernel found for bias '{full_key}'. "
                   f"Falling back to independent int32 quantization.")
-            from src.jax_implementation.quantize_model_weights import \
-                quantize_tensor_int32
             quantized_params[k] = quantize_tensor_int32(v)
         else:
             input_scale = h_scale if in_lstm_hidden_block else scale_x
