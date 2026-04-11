@@ -1,7 +1,24 @@
 #pragma once
+
 #include <cuda_fp16.h>
 #include <cuda_bf16.h>
+#include <cuda.h>
+#include <stdio.h>
 
+#ifndef CUDA_UTILS_H
+#define CUDA_UTILS_H
+
+#define CHECK_CUDA(call) { \
+    cudaError_t err = call; \
+    if (err != cudaSuccess) \
+    { \
+        printf("CUDA Error: %s (at %s:%d)\n", cudaGetErrorString(err), \
+        __FILE__, __LINE__); \
+        return -1; \
+    } \
+}
+
+#endif
 
 std::tuple<int, int> get_threads_and_blocks(int total_tokens,
                                             int threads = 256);

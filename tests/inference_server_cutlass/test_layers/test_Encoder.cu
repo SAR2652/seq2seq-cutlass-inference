@@ -14,10 +14,9 @@ int main()
     cudaStream_t stream;
     cudaStreamCreate(&stream);
 
-    std::string json_path = std::filesystem::absolute(
-        "../../../output/metadata.json").string();
-    std::string bin_path = std::filesystem::absolute(
-        "../../../output/weights.bin").string();
+    std::string common_path = "/home/sar26/ML/Polynomial-Expansion/output/";
+    std::string json_path = common_path + "metadata.json";
+    std::string bin_path = common_path + "weights.bin";
 
     WeightsMetadata* wmd = new WeightsMetadata(json_path, bin_path);
 
