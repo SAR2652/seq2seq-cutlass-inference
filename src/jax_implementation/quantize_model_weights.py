@@ -1,11 +1,12 @@
 import os
-import jax
 import json
 import argparse
 import numpy as np
+from typing import Union
+
+import jax
 from jax import random
 import jax.numpy as jnp
-from typing import Union
 import orbax.checkpoint as ocp
 from src.common_utils import load_tokenizer
 from src.jax_implementation.utils import init_train_state

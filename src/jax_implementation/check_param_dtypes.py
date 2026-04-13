@@ -1,6 +1,7 @@
 import os
-import jax
 import argparse
+
+import jax
 from orbax.checkpoint import PyTreeCheckpointer, CheckpointManager
 
 

@@ -1,18 +1,19 @@
 import os
-import jax
+
 import optax
 import argparse
 import pandas as pd
+import jax
 from jax import random
 import jax.numpy as jnp
 from torch.utils.data import DataLoader
-from orbax.checkpoint import PyTreeCheckpointer
+from orbax.checkpoint import PyTreeCheckpointer, CheckpointManager, \
+    CheckpointManagerOptions
 from flax.training import train_state, orbax_utils
 from src.dataset import PolynomialDataset
 from src.common_utils import load_tokenizer, collate_fn
 from src.jax_implementation.utils import init_train_state
 from src.jax_implementation.model import CrossAttentionModelFLAX
-from orbax.checkpoint import CheckpointManager, CheckpointManagerOptions
 
 
 def get_training_arguments():

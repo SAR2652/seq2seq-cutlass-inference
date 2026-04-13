@@ -1,18 +1,22 @@
 import os
-import jax
-import time
-import optax
-import wandb
 import argparse
-import pandas as pd
+import time
+from typing import Tuple
+
+import jax
 from jax import random
 import jax.numpy as jnp
-from typing import Tuple
-import orbax.checkpoint as ocp
+import optax
+import wandb
+
 from flax.training import train_state
-from src.dataset import PolynomialDataset
-from torch.utils.data import DataLoader
 from flax.jax_utils import replicate, unreplicate
+import orbax.checkpoint as ocp
+
+import pandas as pd
+from torch.utils.data import DataLoader
+
+from src.dataset import PolynomialDataset
 from src.jax_implementation.model import CrossAttentionModelFLAX
 from src.common_utils import load_tokenizer, collate_fn, WandbCSVLogger
 from src.jax_implementation.utils import eval_step, train_epoch_or_evaluate, \

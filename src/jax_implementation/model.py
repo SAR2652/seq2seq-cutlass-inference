@@ -1,6 +1,7 @@
 import jax
-from enum import Enum
 import jax.numpy as jnp
+
+from enum import Enum
 import flax.linen as nn
 
 

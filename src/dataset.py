@@ -1,4 +1,4 @@
-from torch.utils.data import Dataset    # type: ignore
+from torch.utils.data import Dataset
 
 
 class PolynomialDataset(Dataset):

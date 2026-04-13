@@ -1,13 +1,14 @@
-import jax
 import time
-import optax
 import functools
+from typing import Union, Tuple, Literal
+
+import optax
 import numpy as np
+import jax
 import jax.numpy as jnp
 from flax.training import train_state
 from flax.jax_utils import replicate
 from torch.utils.data import DataLoader
-from typing import Union, Tuple, Literal
 
 
 @functools.partial(jax.jit, static_argnums=0)

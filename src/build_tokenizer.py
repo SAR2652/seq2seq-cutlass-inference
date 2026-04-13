@@ -1,6 +1,7 @@
 import os
-import joblib
 import argparse
+
+import joblib
 from src.common_utils import load_file, Tokenizer
 
 

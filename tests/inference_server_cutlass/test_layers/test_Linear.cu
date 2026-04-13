@@ -19,9 +19,10 @@ int main()
     cudaStream_t stream;
     cudaStreamCreate(&stream);
 
-    std::string common_path = "/home/sar26/ML/Polynomial-Expansion/output/";
-    std::string json_path = common_path + "metadata.json";
-    std::string bin_path = common_path + "weights.bin";
+    std::string common_path = "/home/sarvesh26/ML/seq2seq-cutlass-inference/";
+    common_path += "output/";
+    const std::string json_path = common_path + "metadata.json";
+    const std::string bin_path = common_path + "weights.bin";
 
     WeightsMetadata* wmd = new WeightsMetadata(json_path, bin_path);
 

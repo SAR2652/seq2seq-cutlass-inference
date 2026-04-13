@@ -1,9 +1,11 @@
 import os
 import argparse
-import numpy as np      # type: ignore
-import pandas as pd     # type: ignore
-from common_utils import load_file
-from sklearn.model_selection import train_test_split    # type: ignore
+
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+from src.common_utils import load_file
 
 
 def get_arguments():

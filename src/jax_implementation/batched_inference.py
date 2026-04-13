@@ -1,10 +1,12 @@
 import os
-import jax
 import argparse
-import numpy as np
-import pandas as pd
+
+import jax
 import jax.numpy as jnp
 import jax.random as random
+
+import numpy as np
+import pandas as pd
 import orbax.checkpoint as ocp
 from torch.utils.data import DataLoader
 from src.dataset import PolynomialDataset
