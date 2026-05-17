@@ -101,22 +101,22 @@ LSTMCell<KernelType, BiasType>::LSTMCell(
 template <typename KernelType, typename BiasType>
 LSTMCell<KernelType, BiasType>::~LSTMCell()
 {
-    cudaFreeAsync(hf_bias, stream_);
-    cudaFreeAsync(hf_kernel, stream_);
+    cudaFree(hf_bias);
+    cudaFree(hf_kernel);
 
-    cudaFreeAsync(hg_bias, stream_);
-    cudaFreeAsync(hg_kernel, stream_);
+    cudaFree(hg_bias);
+    cudaFree(hg_kernel);
 
-    cudaFreeAsync(hi_bias, stream_);
-    cudaFreeAsync(hi_kernel, stream_);
+    cudaFree(hi_bias);
+    cudaFree(hi_kernel);
 
-    cudaFreeAsync(ho_bias, stream_);
-    cudaFreeAsync(ho_kernel, stream_);
+    cudaFree(ho_bias);
+    cudaFree(ho_kernel);
 
-    cudaFreeAsync(if_kernel, stream_);
-    cudaFreeAsync(ig_kernel, stream_);
-    cudaFreeAsync(ii_kernel, stream_);
-    cudaFreeAsync(io_kernel, stream_);
+    cudaFree(if_kernel);
+    cudaFree(ig_kernel);
+    cudaFree(ii_kernel);
+    cudaFree(io_kernel);
 
     for (int i = 0; i < 4; i++)
         cudaStreamDestroy(gate_streams_[i]);

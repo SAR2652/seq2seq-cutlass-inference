@@ -7,16 +7,16 @@ T* Layer::load_to_device(const std::vector<char>& buffer) const
     size_t num_elements = buffer.size() / sizeof(T);
     T* device_ptr = nullptr;
 
-    cudaError_t err = cudaMallocAsync(&device_ptr,
-        num_elements * sizeof(T), stream_
+    cudaError_t err = cudaMalloc(&device_ptr,
+        num_elements * sizeof(T)
     );
     if (err != cudaSuccess) {
         throw std::runtime_error("cudaMalloc failed: "
         + std::string(cudaGetErrorString(err)));
     }
 
-    err = cudaMemcpyAsync(device_ptr, buffer.data(),
-        num_elements * sizeof(T), cudaMemcpyHostToDevice, stream_
+    err = cudaMemcpy(device_ptr, buffer.data(),
+        num_elements * sizeof(T), cudaMemcpyHostToDevice
     );
     if (err != cudaSuccess) {
         cudaFree(device_ptr);

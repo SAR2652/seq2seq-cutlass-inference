@@ -22,8 +22,8 @@ Linear<KernelType, BiasType>::Linear(
 template <typename KernelType, typename BiasType>
 Linear<KernelType, BiasType>::~Linear()
 {
-    cudaFreeAsync(bias, stream_);
-    cudaFreeAsync(kernel, stream_);
+    cudaFree(bias);
+    cudaFree(kernel);
 }
 
 

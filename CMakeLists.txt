@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
+set(CMAKE_CUDA_COMPILER /usr/local/cuda-13.0/bin/nvcc)
+set(CMAKE_CUDA_ARCHITECTURES 80)
+
 # project name
 project(polynomial_expansion LANGUAGES CXX CUDA)
 
@@ -12,7 +15,7 @@ set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # Set your target GPU architecture (adjust if needed)
-set(CMAKE_CUDA_ARCHITECTURES 80)
+set(CMAKE_CUDA_ARCHITECTURES 120)
 
 enable_testing()
 

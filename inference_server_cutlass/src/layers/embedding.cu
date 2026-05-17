@@ -145,5 +145,5 @@ void Embedding::forward(int* input_indices,
 
 Embedding::~Embedding()
 {
-    cudaFreeAsync(embedding, stream_);
+    cudaFree(embedding);
 }
